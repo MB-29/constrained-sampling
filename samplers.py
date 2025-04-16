@@ -14,6 +14,7 @@ class Langevin:
 
     def __repr__(self):
         return "langevin"
+    
     def step(self, x, z, lambd, step_index, n_samples):
             gradient = self.grad_potential(x, step_index)
 
@@ -27,6 +28,7 @@ class Langevin:
             lambd = np.zeros(self.m)
 
             return x, z, lambd
+    
     def sample(self, n_steps, n_samples=1):
         primal_iterates = np.zeros((n_samples, n_steps, self.d))
         projected_iterates = np.zeros((n_samples, n_steps, self.d))
@@ -91,7 +93,7 @@ class PrimalDescentDualAscent(Langevin):
         self.burn_in = burn_in
 
     def __repr__(self):
-        return "primal-dual"
+        return "descent-ascent"
 
     def step(self, x, z, lambd, step_index, n_samples):
 
@@ -130,11 +132,12 @@ class SplitLangevin(Langevin):
 
     def __repr__(self):
         return "split-langevin"
+    
     def step(self, x, z, lambd, step_index, n_samples):
         self.rho = self.rho_values[step_index]
         grad_potential = self.grad_potential(x) 
-        squared_distance = np.sum((x - z + lambd)**2, axis=1).reshape((-1, 1))
-        grad_augmented_potential = grad_potential + self.rho*squared_distance*(x - z + lambd)
+        # squared_distance = np.sum((x - z + lambd)**2, axis=1).reshape((-1, 1))
+        grad_augmented_potential = grad_potential + self.rho*(x - z + lambd)
         noise = self.sigma*np.sqrt(2*self.tau)*np.random.randn(n_samples, self.d)
 
         x += -self.tau * grad_augmented_potential + noise
@@ -147,3 +150,4 @@ class SplitLangevin(Langevin):
         constraint = (x - z) @ lambd
         augmentation = rho * np.linalg.sum(constraint**2, axis=1)
         return potential + constraint + augmentation
+    
