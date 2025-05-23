@@ -1,4 +1,4 @@
-import numpy as np
+import jax.numpy as jnp
 
 epsilon = .7
 b, c = -epsilon, -(1 + epsilon)
@@ -19,12 +19,12 @@ class Particle:
         x, y = position[:, :1], position[:, 1:]
         gradient_x = mode_potential_gradient(x)
         gradient_y = y/self.sigma_y**2
-        gradient = np.concatenate((gradient_x, gradient_y), axis=1)
+        gradient = jnp.concatenate((gradient_x, gradient_y), axis=1)
         return gradient
     
     def potential(self, position, step_index=0):
         x, y = position[:, :1], position[:, 1:]
         potential_x = mode_potential(x)
-        potential_y = y**2/self.sigma_y**2
+        potential_y = .5*y**2/self.sigma_y**2
         potential = potential_x + potential_y
         return potential

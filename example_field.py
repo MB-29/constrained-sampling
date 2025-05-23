@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 
 from constraint import L2NormConstraint
 from systems.field import Field
-from samplers import Langevin, ProjectedLangevin, SplitLangevin, PrimalDescentDualAscent
+from samplers import Langevin, ProjectedLangevin, SplitLangevin, PrimalDescentDualAscent, VarianceSplit
 
 # distribution
 nx, ny = 100, 100
@@ -30,11 +30,14 @@ langevin = Langevin(d, grad_potential, tau,
 projected = ProjectedLangevin(d, grad_potential, constraint, tau, burn_in, sigma0=sigma0)
 descent_ascent = sampler = PrimalDescentDualAscent(d, field.grad_potential, constraint, tau, eta, burn_in=burn_in)
 augmented = SplitLangevin(d, grad_potential, constraint, tau, rho_values, eta, burn_in, sigma0=sigma0)
+variance_split = VarianceSplit(d, grad_potential, constraint, tau, eta, burn_in, sigma0=sigma0)
+
 sampler_choice = {
-    'langevin': langevin,
-    'projected': projected,
-    'descent_ascent': descent_ascent,
-    'augmented': augmented
+    # 'langevin': langevin,
+    # 'projected': projected,
+    # 'descent_ascent': descent_ascent,
+    # 'augmented': augmented,
+    'variance-split': variance_split
     }
 
 # run and plot
