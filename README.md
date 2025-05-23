@@ -1,7 +1,6 @@
-# Physically constrained generative models
+# Strictly Constrained Generative Modeling via Split Augmented Langevin Sampling
 
-
-Langevin sampling subject to hard constraints using Augmented Lagrangian algorithms.
+Langevin sampling subject to hard constraints using Split Augmented Langevin.
 
 ## Code structure
 

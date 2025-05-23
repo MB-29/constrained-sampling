@@ -5,15 +5,15 @@ from tqdm import tqdm
 
 class Langevin:
 
-    def __init__(self, d, grad_potential, tau, get_step=None, constraint=None, sigma0=None):
+    def __init__(self, d, grad_potential, tau, get_step=None, sigma0=None):
         self.tau = tau
         self.d = d
         self.m = 1
         self.grad_potential = grad_potential
         self.sigma0 = 1 if sigma0 is None else sigma0
 
-        self.project = constraint.project if constraint is not None else lambda x: x
         self.get_step = get_step if get_step is not None else lambda t: tau
+        self.project = lambda x: x
 
 
     def sample(self, key, n_steps, n_samples):
@@ -56,61 +56,36 @@ class Langevin:
     def __repr__(self):
         return "langevin"
     
-    # def step(self, x, z, lambd, step_index, n_samples):
-    #         gradient = self.grad_potential(x, step_index)
-
-    #         noise = np.sqrt(2*self.tau)*np.random.randn(n_samples, self.d)
-    #         delta_x = -self.tau * gradient + noise
-    #         proposal = x + delta_x
-
-    #         x_ = proposal
-    #         x = x_
-    #         z = x_.copy()
-    #         lambd = np.zeros(self.m)
-
-    #         return x, z, lambd
-    
-    # def sample(self, n_steps, n_samples=1):
-    #     primal_iterates = np.zeros((n_samples, n_steps, self.d))
-    #     projected_iterates = np.zeros((n_samples, n_steps, self.d))
-    #     dual_iterates = np.zeros((n_samples, n_steps, self.m))
-
-    #     x = self.sigma0*np.random.randn(n_samples, self.d)
-    #     lambd = np.zeros((n_samples, self.m))
-    #     z = self.project(x)
-
-    #     for step_index in tqdm(range(n_steps)):
-    #         primal_iterates[:, step_index, :] = x.copy()
-    #         projected_iterates[:, step_index, :] = z.copy()
-    #         dual_iterates[:, step_index, :] = lambd.copy()
-
-    #         x, z, lambd = self.step(x, z, lambd, step_index, n_samples)
-
-    #     return primal_iterates, projected_iterates, dual_iterates
     
 class ProjectedLangevin(Langevin):
-    def __init__(self, d, grad_potential, constraint, tau, burn_in, sigma0=None):
-        super().__init__(d, grad_potential, tau, constraint=constraint, sigma0=sigma0)
+    def __init__(self, d, grad_potential, constraint, tau, burn_in, get_step=None, sigma0=None):
+        super().__init__(d, grad_potential, tau, get_step=get_step, sigma0=sigma0)
         self.project = constraint.project
         self.burn_in = burn_in
         
     def __repr__(self):
         return "projected"
+    
+    def step(self, carry, step_index):
 
-    def step(self, x, z, lambd, step_index, n_samples):
+        iterate, step_index, key = carry
+        x, z, lambd = iterate
+        key, subkey = jax.random.split(key)
+
+        tau = self.get_step(step_index)
         gradient = self.grad_potential(x, step_index)
-        noise = np.sqrt(2*self.tau)*np.random.randn(n_samples, self.d)
-        delta_x = - self.tau * gradient + noise
-        proposal = x + delta_x
-        x_ = proposal
-        x = x_
-        z = self.project(x_)
-        lambd = np.zeros((n_samples, self.m))
+        noise = jax.random.normal(key, x.shape)
 
-        if step_index > self.burn_in:
-            x = z.copy()
-            # print(f'project')
-        return x, z, lambd
+        x_ = x - tau*gradient + jnp.sqrt(2*tau)*noise
+        z_ = self.project(x_)
+        x_ = z_.copy()
+        lambd_ = lambd
+
+        iterate_ = (x_, z_, lambd_)
+        step_index_ = step_index + 1
+        carry_ = (iterate_, step_index_, subkey)
+        return carry_, iterate_
+
 
 
 class PrimalDescentDualAscent(Langevin):
@@ -126,7 +101,7 @@ class PrimalDescentDualAscent(Langevin):
             rho=0.,
             sigma0=None
             ):
-        super().__init__(d, grad_potential, tau, constraint=constraint, sigma0=sigma0)
+        super().__init__(d, grad_potential, tau, sigma0=sigma0)
         self.equality_constraint = constraint.equality_constraint
         self.grad_equality_constraint = constraint.grad_equality_constraint
         self.eta = eta
@@ -137,19 +112,27 @@ class PrimalDescentDualAscent(Langevin):
     def __repr__(self):
         return "descent-ascent"
 
-    def step(self, x, z, lambd, step_index, n_samples):
+    def step(self, carry, step_index):
 
+        iterate, step_index, key = carry
+        x, z, lambd = iterate
+        key, subkey = jax.random.split(key)
+
+        tau = self.get_step(step_index)
+        potential_gradient = self.grad_potential(x, step_index)
+        noise = jax.random.normal(key, x.shape)
         constraint_grad = self.grad_equality_constraint(x)
         constraint = self.equality_constraint(x)
-        potential_grad = self.grad_potential(x) + self.rho*constraint*constraint_grad
-        gradient = potential_grad + lambd * constraint_grad
-        noise = np.sqrt(2*self.tau)*np.random.randn(n_samples, self.d)
+        gradient = potential_gradient + lambd * constraint_grad
 
-        x += -self.tau * gradient + noise
-        lambd += self.eta*constraint
+        x_ = x - tau*gradient + jnp.sqrt(2*tau)*noise
+        lambd_ = lambd + self.eta*constraint
+        z_ = x_.copy()
 
-        return x, z, lambd
-
+        iterate_ = (x_, z_, lambd_)
+        step_index_ = step_index + 1
+        carry_ = (iterate_, step_index_, subkey)
+        return carry_, iterate_
 
 class SplitLangevin(Langevin):
 
@@ -164,7 +147,7 @@ class SplitLangevin(Langevin):
             burn_in,
             sigma0=None
     ):
-        super().__init__(d, grad_potential, tau, constraint, sigma0=sigma0)
+        super().__init__(d, grad_potential, tau, sigma0=sigma0)
         self.m = self.d
         self.project = constraint.project
         self.rho_values = rho_values
@@ -175,21 +158,28 @@ class SplitLangevin(Langevin):
     def __repr__(self):
         return "split-langevin"
     
-    def step(self, x, z, lambd, step_index, n_samples):
-        self.rho = self.rho_values[step_index]
-        grad_potential = self.grad_potential(x) 
-        # squared_distance = np.sum((x - z + lambd)**2, axis=1).reshape((-1, 1))
-        grad_augmented_potential = grad_potential + self.rho*(x - z + lambd)
-        noise = self.sigma*np.sqrt(2*self.tau)*np.random.randn(n_samples, self.d)
+    # def sample(self, key, n_steps, n_samples, rho_values):
+    #     self.rho_values = rho_values
+    #     super().sample(key, n_steps, n_samples)
 
-        x += -self.tau * grad_augmented_potential + noise
-        z = self.project(x + lambd)
-        lambd += self.eta*(x - z)
-        return x, z, lambd
+    def step(self, carry, step_index):
 
-    def lagrangian(self, x, z, lambd, rho):
-        potential = self.potential(x) 
-        constraint = (x - z) @ lambd
-        augmentation = rho * np.linalg.sum(constraint**2, axis=1)
-        return potential + constraint + augmentation
-    
+        iterate, step_index, key = carry
+        x, z, lambd = iterate
+        key, subkey = jax.random.split(key)
+
+        rho = self.rho_values[step_index]
+        tau = self.get_step(step_index)
+        potential_gradient = self.grad_potential(x, step_index)
+        noise = jax.random.normal(key, x.shape)
+        augmentation = rho*(x - z + lambd)
+        gradient = potential_gradient + augmentation
+
+        x_ = x - tau*gradient + jnp.sqrt(2*tau)*noise
+        z_ = self.project(x_ + lambd)
+        lambd_ = lambd + self.eta*(x_ - z_)
+
+        iterate_ = (x_, z_, lambd_)
+        step_index_ = step_index + 1
+        carry_ = (iterate_, step_index_, subkey)
+        return carry_, iterate_
